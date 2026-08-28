@@ -3,10 +3,13 @@ import React, { useCallback, useState } from 'react';
 import { Upload, FileText, X, CheckCircle } from 'lucide-react';
 
 interface ResumeUploadProps {
+  /** Called with extracted text (for .txt) or empty string (for PDF — backend extracts). */
   onResumeExtracted: (text: string) => void;
+  /** Always called with the raw File so Index.tsx can POST it to the backend. */
+  onFileSelected: (file: File | null) => void;
 }
 
-const ResumeUpload: React.FC<ResumeUploadProps> = ({ onResumeExtracted }) => {
+const ResumeUpload: React.FC<ResumeUploadProps> = ({ onResumeExtracted, onFileSelected }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -47,17 +50,27 @@ const ResumeUpload: React.FC<ResumeUploadProps> = ({ onResumeExtracted }) => {
   };
 
   const handleFile = async (file: File) => {
-    if (!file.type.includes('text') && !file.name.endsWith('.txt') && !file.name.endsWith('.pdf')) {
-      alert('Please upload a text file (.txt) or PDF file');
+    const isPdf = file.type === 'application/pdf' || file.name.endsWith('.pdf');
+    const isTxt = file.type.includes('text') || file.name.endsWith('.txt');
+
+    if (!isPdf && !isTxt) {
+      alert('Please upload a PDF or plain-text (.txt) file');
       return;
     }
 
     setIsProcessing(true);
     setUploadedFile(file);
+    onFileSelected(file); // always pass the raw file to the parent
 
     try {
-      const text = await extractTextFromFile(file);
-      onResumeExtracted(text);
+      if (isTxt) {
+        // Text files: extract locally and pass the string
+        const text = await readAsText(file);
+        onResumeExtracted(text);
+      } else {
+        // PDF files: backend handles extraction — just signal "ready"
+        onResumeExtracted('__PDF_FILE__');
+      }
     } catch (error) {
       console.error('Error processing file:', error);
       alert('Error processing file. Please try again.');
@@ -66,36 +79,21 @@ const ResumeUpload: React.FC<ResumeUploadProps> = ({ onResumeExtracted }) => {
     }
   };
 
-  const extractTextFromFile = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
+  const readAsText = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
       const reader = new FileReader();
-      
       reader.onload = (e) => {
         const text = e.target?.result as string;
-        if (text) {
-          resolve(text);
-        } else {
-          reject(new Error('Could not read file'));
-        }
+        text ? resolve(text) : reject(new Error('Could not read file'));
       };
-      
       reader.onerror = () => reject(new Error('Error reading file'));
-      
-      if (file.type.includes('text') || file.name.endsWith('.txt')) {
-        reader.readAsText(file);
-      } else {
-        // For PDF files, we'll simulate text extraction
-        // In a real app, you'd use a PDF parsing library
-        setTimeout(() => {
-          resolve(`Sample resume content from ${file.name}. This would contain actual resume text with skills like JavaScript, React, Node.js, and experience in software development. Previous roles include Software Engineer at Tech Company with 3+ years of experience building web applications.`);
-        }, 1000);
-      }
+      reader.readAsText(file);
     });
-  };
 
   const removeFile = () => {
     setUploadedFile(null);
     onResumeExtracted('');
+    onFileSelected(null);
   };
 
   if (uploadedFile && !isProcessing) {

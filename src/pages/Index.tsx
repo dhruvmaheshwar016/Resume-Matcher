@@ -7,13 +7,17 @@ import ResumeUpload from '../components/ResumeUpload';
 import JobDescriptionInput from '../components/JobDescriptionInput';
 import AnalysisResults from '../components/AnalysisResults';
 
+const API_BASE = 'http://localhost:8000';
+
 const Index = () => {
-  const { user, loading } = useAuth();
+  const { user, session, loading } = useAuth();
   const navigate = useNavigate();
   const [resumeText, setResumeText] = useState('');
+  const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [jobDescription, setJobDescription] = useState('');
   const [analysisResults, setAnalysisResults] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   // Redirect to auth if not logged in
   useEffect(() => {
@@ -31,52 +35,61 @@ const Index = () => {
     );
   }
 
+  const isReady = !!resumeFile && !!jobDescription.trim();
+
   const handleAnalyze = async () => {
-    if (!resumeText || !jobDescription) {
-      alert('Please upload a resume and enter a job description');
+    if (!resumeFile || !jobDescription.trim()) {
+      setErrorMessage('Please upload a resume and enter a job description.');
+      return;
+    }
+    if (!session?.token) {
+      setErrorMessage('You are not logged in. Please sign in again.');
+      navigate('/auth');
       return;
     }
 
     setIsAnalyzing(true);
-    // Simulate analysis delay
-    setTimeout(() => {
-      const results = analyzeMatch(resumeText, jobDescription);
-      setAnalysisResults(results);
+    setErrorMessage('');
+
+    try {
+      const formData = new FormData();
+      formData.append('resume_file', resumeFile);
+      formData.append('job_description', jobDescription);
+
+      const res = await fetch(`${API_BASE}/analyze/pdf`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.token}`,
+        },
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.detail || `Server error: ${res.status}`);
+      }
+
+      // Map backend response to the shape AnalysisResults component expects
+      setAnalysisResults({
+        overallScore: data.scores.overall_score,
+        skillsScore: data.scores.skills_score,
+        keywordScore: data.scores.keyword_score,
+        experienceScore: data.scores.experience_score,
+        formattingScore: data.scores.formatting_score,
+        matchedSkills: data.matched_skills,
+        missingSkills: data.missing_skills,
+        strengths: data.strengths,
+        weaknesses: data.weaknesses,
+        recommendations: data.recommendations,
+        summary: data.summary,
+        atsTips: data.ats_tips,
+      });
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Something went wrong. Please try again.');
+    } finally {
       setIsAnalyzing(false);
-    }, 2000);
-  };
-
-  const analyzeMatch = (resume, job) => {
-    // Simple matching algorithm
-    const resumeWords = resume.toLowerCase().split(/\s+/);
-    const jobWords = job.toLowerCase().split(/\s+/);
-    
-    const commonSkills = ['javascript', 'react', 'node.js', 'python', 'sql', 'css', 'html', 'java', 'c++', 'git', 'aws', 'docker', 'kubernetes'];
-    const foundSkills = commonSkills.filter(skill => 
-      resume.toLowerCase().includes(skill) && job.toLowerCase().includes(skill)
-    );
-
-    const keywordMatches = jobWords.filter(word => 
-      resumeWords.includes(word) && word.length > 3
-    ).length;
-
-    const skillsScore = Math.min((foundSkills.length / 5) * 100, 100);
-    const keywordScore = Math.min((keywordMatches / jobWords.length) * 200, 100);
-    const experienceScore = resume.toLowerCase().includes('experience') ? 85 : 60;
-    const overallScore = Math.round((skillsScore + keywordScore + experienceScore) / 3);
-
-    return {
-      overallScore,
-      skillsScore: Math.round(skillsScore),
-      keywordScore: Math.round(keywordScore),
-      experienceScore,
-      matchedSkills: foundSkills,
-      recommendations: [
-        'Add more relevant keywords from the job description',
-        'Highlight specific achievements with metrics',
-        'Include industry-specific certifications'
-      ]
-    };
+    }
   };
 
   return (
@@ -106,10 +119,10 @@ const Index = () => {
             <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent"> Every Job</span>
           </h2>
           <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
-            Our AI-powered system analyzes how well your resume matches job descriptions, 
+            Our AI-powered system analyzes how well your resume matches job descriptions,
             giving you insights on skills, keywords, and experience alignment.
           </p>
-          
+
           {/* Feature Cards */}
           <div className="grid md:grid-cols-3 gap-6 mb-12">
             <div className="bg-white/70 backdrop-blur-sm rounded-xl p-6 border border-gray-200/50 hover:shadow-lg transition-all duration-300">
@@ -119,7 +132,7 @@ const Index = () => {
               <h3 className="text-lg font-semibold text-gray-900 mb-2">AI-Powered Analysis</h3>
               <p className="text-gray-600">Advanced algorithms analyze your resume against job requirements</p>
             </div>
-            
+
             <div className="bg-white/70 backdrop-blur-sm rounded-xl p-6 border border-gray-200/50 hover:shadow-lg transition-all duration-300">
               <div className="bg-purple-100 p-3 rounded-lg w-fit mx-auto mb-4">
                 <TrendingUp className="h-6 w-6 text-purple-600" />
@@ -127,7 +140,7 @@ const Index = () => {
               <h3 className="text-lg font-semibold text-gray-900 mb-2">Match Scoring</h3>
               <p className="text-gray-600">Get detailed scores for skills, keywords, and experience alignment</p>
             </div>
-            
+
             <div className="bg-white/70 backdrop-blur-sm rounded-xl p-6 border border-gray-200/50 hover:shadow-lg transition-all duration-300">
               <div className="bg-green-100 p-3 rounded-lg w-fit mx-auto mb-4">
                 <FileText className="h-6 w-6 text-green-600" />
@@ -148,7 +161,10 @@ const Index = () => {
                   <Upload className="h-6 w-6 mr-3 text-blue-600" />
                   Upload Your Resume
                 </h3>
-                <ResumeUpload onResumeExtracted={setResumeText} />
+                <ResumeUpload
+                  onResumeExtracted={setResumeText}
+                  onFileSelected={setResumeFile}
+                />
               </div>
 
               {/* Job Description */}
@@ -157,40 +173,55 @@ const Index = () => {
                   <FileText className="h-6 w-6 mr-3 text-purple-600" />
                   Job Description
                 </h3>
-                <JobDescriptionInput 
+                <JobDescriptionInput
                   value={jobDescription}
                   onChange={setJobDescription}
                 />
               </div>
             </div>
           ) : (
-            <AnalysisResults 
+            <AnalysisResults
               results={analysisResults}
               onReset={() => {
                 setAnalysisResults(null);
                 setResumeText('');
+                setResumeFile(null);
                 setJobDescription('');
+                setErrorMessage('');
               }}
             />
+          )}
+
+          {/* Error Message */}
+          {errorMessage && (
+            <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+              {errorMessage}
+            </div>
           )}
 
           {/* Action Button */}
           {!analysisResults && (
             <div className="text-center mt-8">
               <button
+                id="analyze-btn"
                 onClick={handleAnalyze}
-                disabled={isAnalyzing || !resumeText || !jobDescription}
+                disabled={isAnalyzing || !isReady}
                 className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 shadow-lg hover:shadow-xl"
               >
                 {isAnalyzing ? (
                   <div className="flex items-center">
                     <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-3"></div>
-                    Analyzing...
+                    Analyzing with AI...
                   </div>
                 ) : (
                   'Analyze Match'
                 )}
               </button>
+              {!isReady && !isAnalyzing && (
+                <p className="text-sm text-gray-400 mt-3">
+                  Upload a PDF resume and add a job description to get started
+                </p>
+              )}
             </div>
           )}
         </div>

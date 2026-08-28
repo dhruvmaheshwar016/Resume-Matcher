@@ -1,6 +1,11 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
+const API_BASE = 'http://localhost:8000';
+const TOKEN_KEY = 'auth_token';
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
 interface AuthUser {
   id: string;
   email: string;
@@ -20,53 +25,17 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const TOKEN_KEY = 'auth_token';
-const USERS_KEY = 'auth_users';
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-function createToken(payload: object): string {
-  const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const body = btoa(JSON.stringify({ ...payload, iat: Date.now(), exp: Date.now() + 7 * 24 * 60 * 60 * 1000 }));
-  const signature = btoa(`${header}.${body}`);
-  return `${header}.${body}.${signature}`;
+function buildAuthUser(user: { id: string; email: string; full_name: string }): AuthUser {
+  return {
+    id: user.id,
+    email: user.email,
+    user_metadata: { full_name: user.full_name },
+  };
 }
 
-function decodeToken(token: string): (AuthUser & { exp: number }) | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const payload = JSON.parse(atob(parts[1]));
-    if (payload.exp && payload.exp < Date.now()) return null;
-    return payload;
-  } catch {
-    return null;
-  }
-}
-
-async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-interface StoredUser {
-  id: string;
-  email: string;
-  passwordHash: string;
-  fullName: string;
-}
-
-function getStoredUsers(): StoredUser[] {
-  try {
-    return JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-  } catch {
-    return [];
-  }
-}
-
-function saveStoredUsers(users: StoredUser[]) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-}
+// ── Hook ──────────────────────────────────────────────────────────────────────
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -76,83 +45,99 @@ export const useAuth = () => {
   return context;
 };
 
+// ── Provider ──────────────────────────────────────────────────────────────────
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [session, setSession] = useState<{ token: string } | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // On mount: restore session from localStorage by verifying token with backend
   useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (token) {
-      const decoded = decodeToken(token);
-      if (decoded) {
-        setUser({ id: decoded.id, email: decoded.email, user_metadata: decoded.user_metadata });
-        setSession({ token });
-      } else {
-        localStorage.removeItem(TOKEN_KEY);
+    const restoreSession = async () => {
+      const token = localStorage.getItem(TOKEN_KEY);
+      if (!token) {
+        setLoading(false);
+        return;
       }
-    }
-    setLoading(false);
+
+      try {
+        const res = await fetch(`${API_BASE}/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setUser(buildAuthUser(data));
+          setSession({ token });
+        } else {
+          // Token invalid or expired — clear it
+          localStorage.removeItem(TOKEN_KEY);
+        }
+      } catch {
+        // Backend unreachable — clear stored token to avoid stale state
+        localStorage.removeItem(TOKEN_KEY);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    restoreSession();
   }, []);
+
+  // ── signIn ──────────────────────────────────────────────────────────────────
 
   const signIn = async (email: string, password: string) => {
     try {
-      const users = getStoredUsers();
-      const passwordHash = await hashPassword(password);
-      const found = users.find(u => u.email === email && u.passwordHash === passwordHash);
+      const res = await fetch(`${API_BASE}/auth/signin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
 
-      if (!found) {
-        return { error: { message: 'Invalid email or password' } };
+      const data = await res.json();
+
+      if (!res.ok) {
+        return { error: { message: data.detail || 'Sign in failed' } };
       }
 
-      const authUser: AuthUser = {
-        id: found.id,
-        email: found.email,
-        user_metadata: { full_name: found.fullName },
-      };
-
-      const token = createToken(authUser);
-      localStorage.setItem(TOKEN_KEY, token);
-      setUser(authUser);
-      setSession({ token });
+      // data: { access_token, token_type, user: { id, email, full_name } }
+      localStorage.setItem(TOKEN_KEY, data.access_token);
+      setUser(buildAuthUser(data.user));
+      setSession({ token: data.access_token });
       return { error: null };
     } catch {
-      return { error: { message: 'Sign in failed' } };
+      return { error: { message: 'Could not connect to server. Is the backend running?' } };
     }
   };
+
+  // ── signUp ──────────────────────────────────────────────────────────────────
 
   const signUp = async (email: string, password: string, fullName?: string) => {
     try {
-      const users = getStoredUsers();
+      const res = await fetch(`${API_BASE}/auth/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, full_name: fullName ?? '' }),
+      });
 
-      if (users.find(u => u.email === email)) {
-        return { error: { message: 'An account with this email already exists' } };
+      const data = await res.json();
+
+      if (!res.ok) {
+        return { error: { message: data.detail || 'Sign up failed' } };
       }
 
-      const passwordHash = await hashPassword(password);
-      const newUser: StoredUser = {
-        id: crypto.randomUUID(),
-        email,
-        passwordHash,
-        fullName: fullName || '',
-      };
-      users.push(newUser);
-      saveStoredUsers(users);
-
-      const authUser: AuthUser = {
-        id: newUser.id,
-        email: newUser.email,
-        user_metadata: { full_name: newUser.fullName },
-      };
-      const token = createToken(authUser);
-      localStorage.setItem(TOKEN_KEY, token);
-      setUser(authUser);
-      setSession({ token });
+      // data: { access_token, token_type, user: { id, email, full_name } }
+      localStorage.setItem(TOKEN_KEY, data.access_token);
+      setUser(buildAuthUser(data.user));
+      setSession({ token: data.access_token });
       return { error: null };
     } catch {
-      return { error: { message: 'Sign up failed' } };
+      return { error: { message: 'Could not connect to server. Is the backend running?' } };
     }
   };
+
+  // ── signOut ─────────────────────────────────────────────────────────────────
 
   const signOut = async () => {
     localStorage.removeItem(TOKEN_KEY);
