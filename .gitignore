@@ -53,7 +53,7 @@ ENV/
 # OS
 Thumbs.db
 
-# Nested git repos / frontend (if managed separately)
+# Frontend repo (has its own git repo — managed separately)
 resume-role-analyzer/
 
 # Build
