@@ -1,7 +1,6 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-
-const API_BASE = 'http://localhost:8000';
+import { API_BASE } from '@/lib/api';
 const TOKEN_KEY = 'auth_token';
 
 // ── Types ────────────────────────────────────────────────────────────────────

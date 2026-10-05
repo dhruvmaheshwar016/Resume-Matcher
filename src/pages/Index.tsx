@@ -6,8 +6,7 @@ import UserMenu from '@/components/UserMenu';
 import ResumeUpload from '../components/ResumeUpload';
 import JobDescriptionInput from '../components/JobDescriptionInput';
 import AnalysisResults from '../components/AnalysisResults';
-
-const API_BASE = 'http://localhost:8000';
+import { API_BASE } from '@/lib/api';
 
 const Index = () => {
   const { user, session, loading } = useAuth();

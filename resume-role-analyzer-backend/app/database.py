@@ -5,11 +5,15 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.config import settings
 
-# SQLite engine (swap DATABASE_URL in .env for PostgreSQL in production)
-engine = create_engine(
-    settings.DATABASE_URL,
-    connect_args={"check_same_thread": False}  # SQLite only
-)
+# Render may provide postgres://; psycopg 3 with SQLAlchemy uses this scheme.
+database_url = settings.DATABASE_URL
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql+psycopg://", 1)
+elif database_url.startswith("postgresql://"):
+    database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
+engine = create_engine(database_url, connect_args=connect_args)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

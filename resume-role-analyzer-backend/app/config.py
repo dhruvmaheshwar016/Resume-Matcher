@@ -26,10 +26,10 @@ class Settings:
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
     # CORS — allow the Vite dev server
-    ALLOWED_ORIGINS: list[str] = os.getenv(
+    ALLOWED_ORIGINS: list[str] = [origin.strip() for origin in os.getenv(
         "ALLOWED_ORIGINS",
         "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
-    ).split(",")
+    ).split(",") if origin.strip()]
 
 
 settings = Settings()
